@@ -3,7 +3,7 @@
  *
  * Psi4: an open-source quantum chemistry software package
  *
- * Copyright (c) 2007-2022 The Psi4 Developers.
+ * Copyright (c) 2007-2021 The Psi4 Developers.
  *
  * The copyrights for code used from other parties are included in
  * the corresponding files.
@@ -31,8 +31,8 @@
 #include <pybind11/pytypes.h>
 #include <pybind11/stl_bind.h>
 #include <pybind11/operators.h>
+#include <libint2/shell.h>
 
-#include "psi4/libdpd/dpd.h"
 #include "psi4/libmints/basisset.h"
 #include "psi4/libmints/deriv.h"
 #include "psi4/libmints/twobody.h"
@@ -40,7 +40,6 @@
 #include "psi4/libmints/orbitalspace.h"
 #include "psi4/libmints/local.h"
 #include "psi4/libmints/vector3.h"
-#include "psi4/libmints/matrix.h"
 #include "psi4/libmints/pointgrp.h"
 #include "psi4/libmints/extern.h"
 #include "psi4/libmints/sobasis.h"
@@ -71,7 +70,7 @@
 #include "psi4/libmints/dipole.h"
 #include "psi4/libmints/overlap.h"
 #include "psi4/libmints/sieve.h"
-#include "psi4/libpsi4util/libpsi4util.h"
+
 #include <string>
 
 using namespace psi;
@@ -253,8 +252,8 @@ std::shared_ptr<Molecule> from_dict(py::dict molrec) {
         for (size_t iat = 0; iat < nat; ++iat) {
             std::string symbol = elem.at(iat);
             std::string label = elbl.at(iat);
-            to_upper(symbol);
-            to_upper(label);
+            std::transform(symbol.begin(), symbol.end(), symbol.begin(), ::toupper);
+            std::transform(label.begin(), label.end(), label.begin(), ::toupper);
             mol->add_unsettled_atom(elez.at(iat) * int(real.at(iat)), geom_unsettled.at(iat), symbol, mass.at(iat),
                                     elez.at(iat) * int(real.at(iat)), symbol + label, elea.at(iat));
         }
@@ -272,8 +271,8 @@ std::shared_ptr<Molecule> from_dict(py::dict molrec) {
         for (size_t iat = 0; iat < nat; ++iat) {
             std::string symbol = elem.at(iat);
             std::string label = elbl.at(iat);
-            to_upper(symbol);
-            to_upper(label);
+            std::transform(symbol.begin(), symbol.end(), symbol.begin(), ::toupper);
+            std::transform(label.begin(), label.end(), label.begin(), ::toupper);
             mol->add_atom(elez.at(iat) * int(real.at(iat)), geom.at(3 * iat), geom.at(3 * iat + 1), geom.at(3 * iat + 2),
                           symbol, mass.at(iat), elez.at(iat) * int(real.at(iat)), symbol + label, elea.at(iat));
         }
@@ -313,8 +312,6 @@ void export_mints(py::module& m) {
     typedef double (Vector::*vector_getitem_1)(int) const;
     typedef double (Vector::*vector_getitem_2)(int, int) const;
     typedef void (Vector::*vector_one)(const Vector &other);
-    typedef double (Vector::*vector_one_double)(const Vector &other);
-    typedef void (Vector::*vector_two)(double scale, const Vector &other);
 
     py::class_<Dimension>(m, "Dimension", "Initializes and defines Dimension Objects")
         .def(py::init<int>())
@@ -361,18 +358,11 @@ void export_mints(py::module& m) {
         .def("set", vector_setitem_2(&Vector::set), "Sets a single element value located at m in irrep h", "h"_a, "m"_a,
              "val"_a)
         .def("copy", vector_one(&Vector::copy), "Returns a copy of the matrix")
-        .def("clone", [](Vector& vec) {
-                std::shared_ptr<Vector> result = std::move(vec.clone()); return result; }, "Clone the vector")
-        .def("zero", &Vector::zero, "Zeros the vector")
         .def("print_out", &Vector::print_out, "Prints the vector to the output file")
         .def("scale", &Vector::scale, "Scales the elements of a vector by sc", "sc"_a)
         .def("dim", &Vector::dim, "Returns the dimensions of the vector per irrep h", "h"_a = 0)
         .def("dimpi", &Vector::dimpi, "Returns the Dimension object")
         .def("nirrep", &Vector::nirrep, "Returns the number of irreps")
-        .def("vector_dot", vector_one_double(&Vector::vector_dot), "Take the dot product of two vectors", "other"_a)
-        .def("axpy", vector_two(&Vector::axpy), "Adds to this vector another vector scaled by a", "a"_a, "other"_a)
-        .def("save", &Vector::save, "Save the vector to disk", "psio"_a, "file"_a)
-        .def("load", &Vector::load, "Load the vector from disk", "psio"_a, "file"_a)
         .def("get_block", &Vector::get_block, "Get a vector block", "slice"_a)
         .def("set_block", &Vector::set_block, "Set a vector block", "slice"_a, "block"_a)
         .def(
@@ -450,7 +440,6 @@ void export_mints(py::module& m) {
     typedef double (Matrix::*double_matrix_one)(const SharedMatrix&);
     typedef void (Matrix::*matrix_two)(const SharedMatrix&, const SharedMatrix&);
     typedef void (Matrix::*matrix_save)(const std::string&, bool, bool, bool);
-    typedef void (Matrix::*matrix_save2)(psi::PSIO* const, size_t, Matrix::SaveType);
     typedef void (Matrix::*matrix_set1)(double);
     typedef void (Matrix::*matrix_set3)(int, int, double);
     typedef void (Matrix::*matrix_set4)(int, int, int, double);
@@ -476,8 +465,6 @@ void export_mints(py::module& m) {
         .def(py::init<const std::string&, const Dimension&, const Dimension&>())
         .def(py::init<const std::string&, const Dimension&, const Dimension&, int>())
         .def(py::init<const std::string&>())
-        .def(py::init<dpdbuf4*>())
-        .def(py::init<dpdfile2*>())
         .def("clone", &Matrix::clone, "Creates exact copy of the matrix and returns it")
         .def_property("name", py::cpp_function(&Matrix::name), py::cpp_function(&Matrix::set_name),
                       "The name of the Matrix. Used in printing.")
@@ -587,9 +574,6 @@ void export_mints(py::module& m) {
         .def("save", matrix_save(&Matrix::save),
              "Saves the matrix in ASCII format to filename, as symmetry blocks or full matrix", "filename"_a,
              "append"_a = true, "saveLowerTriangle"_a = true, "saveSubBlocks"_a = false)
-        .def("save", matrix_save2(&Matrix::save),
-             "Saves the matrix in ASCII format to filename, as symmetry blocks or full matrix", "psio"_a,
-             "filename"_a, "savetype"_a = Matrix::SaveType::LowerTriangle)
         .def("load", matrix_load(&Matrix::load),
              "Loads a block matrix from an ASCII file (see tests/mints3 for format)", "filename"_a)
         .def("load_mpqc", &Matrix::load_mpqc, "Loads a matrix from an ASCII file in MPQC format", "filename"_a)
@@ -658,7 +642,6 @@ void export_mints(py::module& m) {
     m.def("triplet", triplet_shared(&linalg::triplet),
           "A"_a, "B"_a, "C"_a, "transA"_a = false, "transB"_a = false, "transC"_a = false, R"pbdoc(
             Returns the multiplication of three matrices, with options to transpose each beforehand.
-
             Parameters
             ----------
             A
@@ -673,12 +656,10 @@ void export_mints(py::module& m) {
                 Transpose the second matrix before operations?
             transC
                 Transpose the third matrix before operations?
-
             Returns
             -------
             Matrix
                 New matrix of ``ABC``.
-
             Notes
             -----
             * ``(AB)C`` vs. ``A(BC)`` selected by cost analysis of overall (not per-irrep) dimensions.
@@ -1154,8 +1135,7 @@ void export_mints(py::module& m) {
              "Return the si'th Gaussian shell on center", "center"_a, "si"_a)
         .def("n_frozen_core", &BasisSet::n_frozen_core,
              "Returns the number of orbital (non-ECP) frozen core electrons. For a given molecule and "
-             ":term:`FREEZE_CORE <FREEZE_CORE (GLOBALS)>`, `(n_ecp_core()/2 + n_frozen_core()) = constant`.",
-             "local"_a="", "molecule"_a=nullptr)
+             ":term:`FREEZE_CORE <FREEZE_CORE (GLOBALS)>`, `(n_ecp_core()/2 + n_frozen_core()) = constant`.")
         .def("n_ecp_core", ncore_no_args(&BasisSet::n_ecp_core),
              "Returns the total number of core electrons associated with all ECPs in this basis.")
         .def("n_ecp_core", ncore_one_arg(&BasisSet::n_ecp_core),
@@ -1175,6 +1155,7 @@ void export_mints(py::module& m) {
         .def("function_to_center", &BasisSet::function_to_center, "The atomic center for the i'th function", "i"_a)
         .def("nshell_on_center", &BasisSet::nshell_on_center, "Return the number of shells on a given center", "i"_a)
         .def("shell_on_center", &BasisSet::shell_on_center, "Return the i'th shell on center.", "c"_a, "i"_a)
+        .def("apply_hermite_normalization", &BasisSet::apply_hermite_normalization, "Renormalize all basis functions assuming that they represent Hermite Gaussians")
         .def("n_ecp_shell_on_center", &BasisSet::n_ecp_shell_on_center,
              "Return the number of ECP shells on a given center", "i"_a)
         .def("ecp_shell_on_center", &BasisSet::ecp_shell_on_center, "Return the i'th ECP shell on center.", "c"_a,
@@ -1188,13 +1169,7 @@ void export_mints(py::module& m) {
         .def("max_function_per_shell", &BasisSet::max_function_per_shell,
              "The max number of basis functions in a shell")
         .def("max_nprimitive", &BasisSet::max_nprimitive, "The max number of primitives in a shell")
-        .def_static("construct_from_pydict", &construct_basisset_from_pydict, "docstring")
-        .def("compute_phi", [](BasisSet& basis, double x, double y, double z) {
-            auto phi_ao = new std::vector<double>(basis.nbf());
-            auto capsule = py::capsule(phi_ao, [](void *phi_ao) { delete reinterpret_cast<std::vector<double>*>(phi_ao); });
-            basis.compute_phi(phi_ao->data(), x, y, z);
-            return py::array(phi_ao->size(), phi_ao->data(), capsule);
-        }, "Calculate the value of all basis functions at a given point x, y, and z");
+        .def_static("construct_from_pydict", &construct_basisset_from_pydict, "docstring");
 
     py::class_<OneBodyAOInt, std::shared_ptr<OneBodyAOInt>> pyOneBodyAOInt(
         m, "OneBodyAOInt", "Basis class for all one-electron integrals");
@@ -1253,9 +1228,7 @@ void export_mints(py::module& m) {
     pyTwoBodyAOInt.def("compute_shell", compute_shell_ints(&TwoBodyAOInt::compute_shell),
                        "Compute ERIs between 4 shells")
         .def("shell_significant", compute_shell_significant(&TwoBodyAOInt::shell_significant),
-                       "Determines if the P,Q,R,S shell combination is significant")
-        .def("update_density", &TwoBodyAOInt::update_density,
-                       "Update density matrix (c1 symmetry) for Density-matrix based integral screening");
+                       "Determines if the P,Q,R,S shell combination is significant");
 
     py::class_<Libint2TwoElectronInt, std::shared_ptr<Libint2TwoElectronInt>>(m, "TwoElectronInt", pyTwoBodyAOInt,
                                                                 "Computes two-electron repulsion integrals")
@@ -1479,12 +1452,12 @@ void export_mints(py::module& m) {
         .def("ao_f12_double_commutator", &MintsHelper::ao_f12_double_commutator, "AO F12 double commutator integrals",
              "corr"_a)
         .def("ao_3coverlap", normal_eri(&MintsHelper::ao_3coverlap), "3 Center overlap integrals")
-        .def("ao_3coverlap", normal_3c(&MintsHelper::ao_3coverlap), "3 Center overlap integrals", "bs1"_a, "bs2"_a,
+        .def("ao_3coverlap", normal_3c(&MintsHelper::ao_3coverlap), "3 Center overalp integrals", "bs1"_a, "bs2"_a,
              "bs3"_a)
 
         // Two-electron MO and transformers
-        .def("mo_eri", eri(&MintsHelper::mo_eri), "MO ERI Integrals. Pass appropriate MO coefficients in the AO basis.",
-             "C1"_a, "C2"_a, "C3"_a, "C4"_a)
+        .def("mo_eri", eri(&MintsHelper::mo_eri), "MO ERI Integrals. Pass appropriate MO coefficients", "C1"_a, "C2"_a,
+             "C3"_a, "C4"_a)
         .def("mo_erf_eri", erf(&MintsHelper::mo_erf_eri), "MO ERFC Omega Integrals", "omega"_a, "C1"_a, "C2"_a, "C3"_a,
              "C4"_a)
         .def("mo_f12", &MintsHelper::mo_f12, "MO F12 Integrals", "corr"_a, "C1"_a, "C2"_a, "C3"_a, "C4"_a)
@@ -1587,7 +1560,11 @@ void export_mints(py::module& m) {
         .def("addCharge", &ExternalPotential::addCharge, "Add a charge Z at (x,y,z)", "Z"_a, "x"_a, "y"_a, "z"_a)
         .def("getCharges", &ExternalPotential::getCharges, "Get the vector of charge tuples")
         .def("appendCharges", &ExternalPotential::appendCharges, "Append a vector of charge tuples to a current ExternalPotential")
-        .def("addBasis", &ExternalPotential::addBasis, "Add a basis of S auxiliary functions iwth Df coefficients",
+        .def("addBasis", &ExternalPotential::addBasis, "Add a basis of auxiliary functions obtained by direct density fitting",
+             "basis"_a, "coefs"_a)
+        .def("addExchangeBasis", &ExternalPotential::addExchangeBasis, "Add a basis of auxiliary functions obtained to describe exchange via overlap integrals",
+             "basis"_a, "coefs"_a)
+        .def("addMultipoles", &ExternalPotential::addMultipoles, "Add a basis of arbitary multipoles with fixed coefficients",
              "basis"_a, "coefs"_a)
         .def("clear", &ExternalPotential::clear, "Reset the field to zero (eliminates all entries)")
         .def("computePotentialMatrix", &ExternalPotential::computePotentialMatrix,
